@@ -25,11 +25,13 @@ video,#ov{position:absolute;inset:0;width:100%;height:100%}video{object-fit:cont
 .card>div{flex:1;min-width:0}.card b{display:block;overflow-wrap:anywhere}.card small{color:#9aa4b2}
 .acts{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}.acts .b{padding:5px 11px;font-size:13px}
 .empty{color:#9aa4b2;text-align:center;margin-top:60px}
+#ed{position:fixed;inset:0;background:#000;z-index:5;display:flex;flex-direction:column;align-items:center;justify-content:center;padding-top:env(safe-area-inset-top,0px)}
+#ec{touch-action:none}#eb{display:flex;gap:8px;padding:12px 12px calc(env(safe-area-inset-bottom,0px) + 12px);flex-wrap:wrap;justify-content:center}
 </style></head><body>
 <div id="cam">
  <video id="v" playsinline muted autoplay></video><canvas id="ov"></canvas><div id="flash"></div>
  <div class="row" id="top">
-  <label class="b"><input type="checkbox" id="auto" checked> Auto</label>
+  <label class="b"><input type="checkbox" id="auto"> Auto</label><label class="b"><input type="checkbox" id="edit" checked> Crop</label>
   <select id="lang"><option value="eng+hin">English + Hindi</option><option value="eng">English only</option><option value="hin">Hindi only</option></select>
   <button class="b" id="libBtn">Files <b id="cnt">0</b></button>
  </div>
@@ -43,6 +45,7 @@ video,#ov{position:absolute;inset:0;width:100%;height:100%}video{object-fit:cont
   </div>
  </div>
 </div>
+<div id="ed" hidden><canvas id="ec"></canvas><div id="eb"><button class="b" id="eRe">Retake</button><button class="b" id="eAuto">Auto-detect</button><button class="b" id="eFull">Full page</button><button class="b" id="eOk" style="background:#2ecc71;color:#000">Save ✓</button></div></div>
 <div id="lib" hidden>
  <header><button class="b" id="back">← Camera</button><button class="b" id="merge">Merge selected → PDF</button></header>
  <div id="list"></div>
@@ -73,6 +76,7 @@ async function loadCV(){
 const dist=(a,b)=>Math.hypot(a[0]-b[0],a[1]-b[1]);
 const disp=(a,b)=>a.reduce((s,p,i)=>s+dist(p,b[i]),0)/4;
 function order(p){const s=p.map(a=>a[0]+a[1]),d=p.map(a=>a[0]-a[1]);return[p[s.indexOf(Math.min(...s))],p[d.indexOf(Math.max(...d))],p[s.indexOf(Math.max(...s))],p[d.indexOf(Math.min(...d))]]}
+const isRect=p=>p.every((a,i)=>{const b=p[(i+1)%4],c=p[(i+3)%4],u=[b[0]-a[0],b[1]-a[1]],w=[c[0]-a[0],c[1]-a[1]];return Math.abs((u[0]*w[0]+u[1]*w[1])/((Math.hypot(...u)*Math.hypot(...w))||1))<.5});
 function findQuad(src){
  const W=src.cols,H=src.rows,g=new cv.Mat(),b=new cv.Mat(),e=new cv.Mat(),m=new cv.Mat(),k=cv.Mat.ones(5,5,cv.CV_8U);
  cv.cvtColor(src,g,cv.COLOR_RGBA2GRAY);cv.GaussianBlur(g,b,new cv.Size(5,5),0);
@@ -84,7 +88,7 @@ function findQuad(src){
   for(let i=0;i<cs.size();i++){const c=cs.get(i),a=cv.contourArea(c);
    if(a>.15*W*H&&a<.97*W*H&&a>ba){const hu=new cv.Mat();cv.convexHull(c,hu,false,true);const pe=cv.arcLength(hu,true);
     for(const f of[.02,.04,.06]){const ap=new cv.Mat();cv.approxPolyDP(hu,ap,f*pe,true);
-     if(ap.rows===4){const d=ap.data32S;best=[[d[0],d[1]],[d[2],d[3]],[d[4],d[5]],[d[6],d[7]]];ba=a;ap.delete();break}ap.delete()}
+     if(ap.rows===4){const d=ap.data32S,pts=[[d[0],d[1]],[d[2],d[3]],[d[4],d[5]],[d[6],d[7]]];ap.delete();if(isRect(pts)){best=pts;ba=a;break}}else ap.delete()}
     hu.delete()}
    c.delete()}
   cs.delete();h.delete()}
@@ -117,12 +121,12 @@ function applyFilter(m,f){
 }
 
 /* ---------- scan pipeline ---------- */
-async function addScan(c,hint){
+function detect(c){const sm=document.createElement('canvas');sm.width=640;sm.height=Math.round(c.height*640/c.width);
+ sm.getContext('2d').drawImage(c,0,0,sm.width,sm.height);const s=cv.imread(sm),q=findQuad(s);s.delete();return q}
+async function addScan(c,q0){
+ try{
  if(!cvOK){say('Engine still loading…');return}
- const sm=document.createElement('canvas'),sc=640/c.width;sm.width=640;sm.height=Math.round(c.height*sc);
- sm.getContext('2d').drawImage(c,0,0,sm.width,sm.height);
- const s2=cv.imread(sm);let q=findQuad(s2);s2.delete();
- const found=!!(q||hint);q=q||hint||[[0,0],[1,0],[1,1],[0,1]];
+ const found=!!q0,q=q0||[[0,0],[1,0],[1,1],[0,1]];
  const p=paperOf(q,c.width,c.height),S=Math.max(900,Math.min(2000,Math.round(p.lo))),OW=Math.round(p.land?S*p.rr:S),OH=Math.round(p.land?S:S*p.rr);
  const src=cv.imread(c),dst=new cv.Mat();
  const a=cv.matFromArray(4,1,cv.CV_32FC2,p.P.flat()),bq=cv.matFromArray(4,1,cv.CV_32FC2,[0,0,OW,0,OW,OH,0,OH]);
@@ -133,8 +137,9 @@ async function addScan(c,hint){
  const img=await new Promise(r=>oc.toBlob(r,'image/jpeg',.88));
  const n=docs.length?Math.max(...docs.map(d=>d.n))+1:1,t=new Date();
  const d={id:Date.now()+Math.random(),n,name:'Scan '+String(n).padStart(3,'0'),created:+t,paper:p.name+(found?'':' (no edge found)'),pw:p.pw,ph:p.ph,img,status:'queued',text:'',pdf:null};
- docs.unshift(d);await put(d);queue.push(d.id);render();pump();
- say('Saved ✓ '+d.name+' ('+p.name+') – place next page')
+ docs.unshift(d);try{await put(d)}catch(e){console.error(e)}queue.push(d.id);render();pump();
+ say('Saved ✓ '+d.name+' ('+p.name+') – next page')
+ }catch(e){say('Error: '+e.message);console.error(e)}
 }
 
 /* ---------- OCR queue ---------- */
@@ -187,7 +192,7 @@ $('libBtn').onclick=()=>{$('lib').hidden=false;render()};$('back').onclick=()=>$
 $('filters').onclick=e=>{const f=e.target.dataset.f;if(!f)return;filter=f;[...$('filters').children].forEach(b=>b.classList.toggle('on',b===e.target))};
 
 /* ---------- camera + live detection ---------- */
-let prev=null,lastQ=null,stable=0,lock=false,lockQ=null,miss=0;
+let prev=null,lastQ=null,stable=0,lock=false,lockQ=null,miss=0,jump=0;
 const dc=document.createElement('canvas');
 function draw(q,p){
  const o=$('ov'),r=o.getBoundingClientRect(),k=devicePixelRatio||1;o.width=r.width*k;o.height=r.height*k;const x=o.getContext('2d');x.scale(k,k);
@@ -196,14 +201,37 @@ function draw(q,p){
  x.beginPath();q.forEach((a,i)=>x[i?'lineTo':'moveTo'](ox+a[0]*vw*s,oy+a[1]*vh*s));x.closePath();
  x.fillStyle=`rgba(46,204,113,${.12+.2*p})`;x.fill();x.lineWidth=3;x.strokeStyle=p>0?'#2ecc71':'#fff';x.stroke()}
 function shoot(){
+ if(!v.videoWidth)return say('Camera not ready');
  lock=true;lockQ=prev;$('flash').classList.add('on');setTimeout(()=>$('flash').classList.remove('on'),130);navigator.vibrate&&navigator.vibrate(30);
- const c=document.createElement('canvas');c.width=v.videoWidth;c.height=v.videoHeight;c.getContext('2d').drawImage(v,0,0);addScan(c,lastQ)}
+ const c=document.createElement('canvas');c.width=v.videoWidth;c.height=v.videoHeight;c.getContext('2d').drawImage(v,0,0);
+ let q=null;try{q=cvOK?detect(c):null}catch(e){}
+ q=q||lastQ;
+ if($('edit').checked)openEd(c,q);else addScan(c,q)}
+let E=null;
+function openEd(c,q){E={c,d:-1,q:(q||[[.08,.08],[.92,.08],[.92,.92],[.08,.92]]).map(p=>[...p])};$('ed').hidden=false;drawEd()}
+function drawEd(){
+ const ce=$('ec'),s=Math.min(innerWidth/E.c.width,(innerHeight-90)/E.c.height),w=Math.round(E.c.width*s),h=Math.round(E.c.height*s);
+ if(ce.width!==w){ce.width=w;ce.height=h}
+ const x=ce.getContext('2d');x.drawImage(E.c,0,0,w,h);
+ x.beginPath();E.q.forEach((p,i)=>x[i?'lineTo':'moveTo'](p[0]*w,p[1]*h));x.closePath();x.fillStyle='rgba(46,204,113,.15)';x.fill();x.lineWidth=3;x.strokeStyle='#2ecc71';x.stroke();
+ E.q.forEach(p=>{x.beginPath();x.arc(p[0]*w,p[1]*h,16,0,7);x.fillStyle='#2ecc71';x.fill();x.strokeStyle='#fff';x.stroke()})}
+const ec=$('ec'),pt=e=>{const r=ec.getBoundingClientRect();return[(e.clientX-r.left)/r.width,(e.clientY-r.top)/r.height]};
+ec.onpointerdown=e=>{const[x,y]=pt(e),r=ec.getBoundingClientRect();let b=-1,bd=1e9;
+ E.q.forEach((p,i)=>{const d=Math.hypot((p[0]-x)*r.width,(p[1]-y)*r.height);if(d<bd){bd=d;b=i}});
+ if(bd<70){E.d=b;ec.setPointerCapture(e.pointerId)}};
+ec.onpointermove=e=>{if(E&&E.d>=0){const[x,y]=pt(e);E.q[E.d]=[Math.min(1,Math.max(0,x)),Math.min(1,Math.max(0,y))];drawEd()}};
+ec.onpointerup=()=>{if(E)E.d=-1};
+$('eRe').onclick=()=>{$('ed').hidden=true;E=null};
+$('eFull').onclick=()=>{E.q=[[0,0],[1,0],[1,1],[0,1]];drawEd()};
+$('eAuto').onclick=()=>{let q=null;try{q=detect(E.c)}catch(e){}if(q){E.q=q;drawEd()}else{$('eAuto').textContent='No edge found';setTimeout(()=>$('eAuto').textContent='Auto-detect',1500)}};
+$('eOk').onclick=async()=>{const{c,q}=E;$('ed').hidden=true;E=null;await addScan(c,order(q))};
+window.addEventListener('error',e=>say('Error: '+e.message));
 function tick(){
- if(!stream||!cvOK||!v.videoWidth||!$('lib').hidden)return setTimeout(tick,250);
+ if(!stream||!cvOK||!v.videoWidth||!$('lib').hidden||!$('ed').hidden)return setTimeout(tick,250);
  try{
   dc.width=480;dc.height=Math.round(480*v.videoHeight/v.videoWidth);dc.getContext('2d').drawImage(v,0,0,dc.width,dc.height);
   const s=cv.imread(dc);let q=findQuad(s);s.delete();
-  if(q&&prev&&disp(q,prev)<.1)q=q.map((p,i)=>[(p[0]+prev[i][0])/2,(p[1]+prev[i][1])/2]);
+  if(q&&prev){const dd=disp(q,prev);if(dd<.1){jump=0;q=q.map((p,i)=>[prev[i][0]*.6+p[0]*.4,prev[i][1]*.6+p[1]*.4])}else if(++jump<4)q=prev;else jump=0}
   const mv=q&&prev?disp(q,prev):1;
   if(q){miss=0;if(mv<.012){stable=stable||Date.now()}else stable=0}else{miss++;stable=0}
   prev=q;if(q)lastQ=q;
@@ -215,7 +243,7 @@ function tick(){
  }catch(e){console.error(e)}
  setTimeout(tick,120)
 }
-$('shut').onclick=()=>{if(v.videoWidth)shoot()};
+$('shut').onclick=shoot;
 $('imp').onchange=async e=>{
  for(const f of e.target.files){const bm=await createImageBitmap(f,{imageOrientation:'from-image'}),k=Math.min(1,3200/Math.max(bm.width,bm.height)),c=document.createElement('canvas');
   c.width=Math.round(bm.width*k);c.height=Math.round(bm.height*k);c.getContext('2d').drawImage(bm,0,0,c.width,c.height);await addScan(c,null)}
