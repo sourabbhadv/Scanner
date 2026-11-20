@@ -1,0 +1,10 @@
+{
+  "name": "DocScan AI",
+  "short_name": "DocScan AI",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0b1220",
+  "theme_color": "#101827",
+  "description": "Offline-capable Hindi and English document scanner"
+}

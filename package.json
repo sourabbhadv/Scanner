@@ -1,0 +1,14 @@
+{
+  "name": "docscan-ai",
+  "version": "0.3.0",
+  "private": true,
+  "description": "Builds a local-asset, offline-capable DocScan AI PWA",
+  "scripts": {
+    "build": "echo 'GitHub Actions workflow assembles the static site and local OCR assets.'"
+  },
+  "dependencies": {
+    "tesseract.js": "5.0.0",
+    "tesseract.js-core": "5.0.0",
+    "jspdf": "2.5.1"
+  }
+}
