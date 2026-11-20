@@ -1,0 +1,57 @@
+name: Build and deploy DocScan AI
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+      - name: Install pinned local dependencies
+        run: npm install --no-save tesseract.js@5.0.0 tesseract.js-core@5.0.0 jspdf@2.5.1
+      - name: Assemble app with local OCR runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p public/vendor/core public/vendor/lang
+          cp index.html manifest.webmanifest sw.js public/
+          cp node_modules/tesseract.js/dist/tesseract.min.js public/vendor/
+          cp node_modules/tesseract.js/dist/worker.min.js public/vendor/
+          cp node_modules/jspdf/dist/jspdf.umd.min.js public/vendor/
+          cp node_modules/tesseract.js-core/*.js public/vendor/core/
+          cp node_modules/tesseract.js-core/*.wasm public/vendor/core/ 2>/dev/null || true
+          curl -fL --retry 3 https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/main/eng.traineddata -o public/vendor/lang/eng.traineddata
+          curl -fL --retry 3 https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/main/hin.traineddata -o public/vendor/lang/hin.traineddata
+          gzip -f public/vendor/lang/eng.traineddata
+          gzip -f public/vendor/lang/hin.traineddata
+          echo "Bundled assets:"
+          du -ah public/vendor | sort -h | tail -20
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
